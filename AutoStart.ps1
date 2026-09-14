@@ -8,12 +8,18 @@
 
 # ------------------------- 設定エリア -------------------------
 
+# このスクリプトがあるフォルダ。
+# .ps1 を直接実行したときは $PSScriptRoot が使える。
+# Run-AutoStart.cmd 経由（スクリプト実行が禁止された環境向けに中身を読み込んで実行）だと
+# $PSScriptRoot は空になるため、その場合は現在の作業フォルダ（.cmd が cd 済み）を使う。
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+
 # 起動後、デスクトップ・ネットワーク・モニターが準備できるまで数秒待つ
 $StartupDelaySeconds = 15
 
 # 自動起動したいプログラムのショートカットを置くフォルダ
 # ショートカットは名前の先頭の番号順に開く（例："1. Chrome"、"2. SMARTDent"）
-$ProgramsFolder = Join-Path $PSScriptRoot 'StartupPrograms'
+$ProgramsFolder = Join-Path $ScriptDir 'StartupPrograms'
 
 # プログラムを1つ開いた後、次を開くまで待つ秒数
 $DelayBetweenProgramsSeconds = 3
@@ -25,13 +31,13 @@ $VideoFolder = 'C:\Users\shizu\Videos\4K Video Downloader+'
 $VideoExtensions = @('.mp4', '.m4v', '.mkv', '.avi', '.wmv', '.mov')
 
 # 起動のたびに生成するプレイリスト
-$PlaylistPath = Join-Path $PSScriptRoot 'AutoStart.wpl'
+$PlaylistPath = Join-Path $ScriptDir 'AutoStart.wpl'
 
 # すべてのプログラムを開いた後、プレーヤーを起動するまで待つ秒数（他のプログラムのウィンドウにフォーカスを奪われて全画面化に失敗するのを防ぐ）
 $WaitBeforeVideoSeconds = 10
 
 # ログファイル（問題が起きたときはここを確認）
-$LogFile = Join-Path $PSScriptRoot 'AutoStart.log'
+$LogFile = Join-Path $ScriptDir 'AutoStart.log'
 
 # ----------------------------------------------------------
 

@@ -24,6 +24,8 @@ Windows 起動（サインイン）後に自動で：①指定したプログラ
 WindowsAutoStart/
 ├─ AutoStart.ps1              # 主腳本 / メインスクリプト
 ├─ Install-AutoStart.ps1      # 安裝／解除安裝開機啟動 / 起動登録・解除スクリプト
+├─ Run-AutoStart.cmd          # 受限環境用啟動器 / スクリプト禁止環境用のランチャー
+├─ Install-AutoStart.cmd      # 受限環境用安裝器 / スクリプト禁止環境用のインストーラー
 ├─ StartupPrograms/           # 放程式捷徑的資料夾 / プログラムのショートカットを置くフォルダ
 │   ├─ 1. Chrome.lnk
 │   └─ 2. SMARTDent.lnk
@@ -71,6 +73,31 @@ powershell -ExecutionPolicy Bypass -File "Install-AutoStart.ps1"
 ```bash
 powershell -ExecutionPolicy Bypass -File "Install-AutoStart.ps1" -Uninstall
 ```
+
+## 電腦禁止腳本執行時 / スクリプト実行が禁止されている場合
+
+若目標電腦被限制執行 PowerShell 腳本（`.ps1`），例如出現「running scripts is disabled on this system」的錯誤，通常是**執行原則（ExecutionPolicy）**被設為 `Restricted`，或被公司／IT 用**群組原則（GPO）**強制鎖定，此時連 `-ExecutionPolicy Bypass` 參數也會被忽略。
+
+不過執行原則只會擋住**載入 `.ps1` 檔案**，而用 `-Command` 直接傳入的指令不受限制。本專案提供的 `.cmd` 啟動器就是利用這一點：它把腳本內容讀進來、用 `Invoke-Expression` 執行，因此**不需要修改任何系統設定、也不需要系統管理員權限**。
+
+目標のパソコンで PowerShell スクリプト（`.ps1`）の実行が制限されている場合（例：「running scripts is disabled on this system」というエラーが出る）、たいていは**実行ポリシー（ExecutionPolicy）**が `Restricted` になっているか、会社・IT が**グループポリシー（GPO）**で強制的にロックしています。この場合は `-ExecutionPolicy Bypass` を付けても無視されます。
+
+ただし実行ポリシーが制限するのは **`.ps1` ファイルの読み込み**だけで、`-Command` で直接渡したコマンドは制限されません。本プロジェクトの `.cmd` ランチャーはこれを利用し、スクリプトの中身を読み込んで `Invoke-Expression` で実行します。そのため**システム設定の変更も管理者権限も不要**です。
+
+**執行方式 / 実行方法：**
+
+- 手動測試（直接雙擊或執行）/ 手動テスト（ダブルクリックまたは実行）：`Run-AutoStart.cmd`
+- 設定開機啟動 / 起動時自動実行を設定：`Install-AutoStart.cmd`
+- 解除開機啟動 / 起動登録を解除：`Install-AutoStart.cmd -Uninstall`
+
+`Install-AutoStart.cmd` 會在「啟動」資料夾建立指向 `Run-AutoStart.cmd` 的捷徑；開機時就透過這個 `.cmd` 執行腳本，完全繞過執行原則。
+`Install-AutoStart.cmd` は「スタートアップ」フォルダに `Run-AutoStart.cmd` を指すショートカットを作成します。起動時はこの `.cmd` を通してスクリプトが実行され、実行ポリシーを完全に回避できます。
+
+> **不需要跑腳本的最簡做法**：按 `Win + R`，輸入 `shell:startup` 開啟「啟動」資料夾，把 `Run-AutoStart.cmd` 的**捷徑**（在檔案上按右鍵→建立捷徑）拖進去即可，一行指令都不用執行。
+> **スクリプトを一切実行しない最も簡単な方法**：`Win + R` で `shell:startup` を開き、`Run-AutoStart.cmd` の**ショートカット**（右クリック→ショートカットの作成）をそのフォルダに入れるだけです。コマンドを1つも実行する必要はありません。
+
+> ⚠️ **例外**：若 IT 進一步啟用了 **AppLocker／WDAC** 或把 PowerShell 鎖進 **Constrained Language Mode**（受限語言模式），連 `Add-Type` 等 .NET 呼叫都會被禁止，本腳本無法運作，`.cmd` 也救不了——這種情況只能請 IT 協助（例如改用有權限的排程或加入白名單）。
+> ⚠️ **例外**：IT がさらに **AppLocker / WDAC** を有効にしていたり、PowerShell を **制約言語モード（Constrained Language Mode）**に固定している場合は、`Add-Type` などの .NET 呼び出しも禁止され、本スクリプトは動作しません（`.cmd` でも回避できません）。この場合は IT 部門に相談してください。
 
 ## 設定項目一覽 / 設定項目一覧（`AutoStart.ps1`）
 
