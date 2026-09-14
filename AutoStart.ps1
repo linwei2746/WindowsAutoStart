@@ -1,36 +1,36 @@
 ﻿# ============================================================
-#  开机自动启动脚本
-#  1. 按编号顺序打开 StartupPrograms 文件夹里的所有快捷方式
-#  2. 用 Windows Media Player Legacy 在第二块屏幕全屏、随机、循环播放视频目录
+#  起動時自動実行スクリプト
+#  1. StartupPrograms フォルダ内のショートカットを番号順にすべて開く
+#  2. Windows Media Player Legacy で動画フォルダをランダム・ループでセカンドモニターに全画面表示
 #
-#  注意：本文件必须以 "UTF-8 with BOM" 编码保存，否则路径里的中日文会乱码。
+#  注意：このファイルは必ず "UTF-8 with BOM" で保存すること。そうしないとパス内の日本語が文字化けする。
 # ============================================================
 
-# ------------------------- 配置区 -------------------------
+# ------------------------- 設定エリア -------------------------
 
-# 开机后先等待几秒，让桌面、网络、显示器都就绪
+# 起動後、デスクトップ・ネットワーク・モニターが準備できるまで数秒待つ
 $StartupDelaySeconds = 15
 
-# 存放要自动启动的程序快捷方式的文件夹
-# 快捷方式按名字开头的编号顺序逐个打开，如 "1. Chrome"、"2. SMARTDent"
+# 自動起動したいプログラムのショートカットを置くフォルダ
+# ショートカットは名前の先頭の番号順に開く（例："1. Chrome"、"2. SMARTDent"）
 $ProgramsFolder = Join-Path $PSScriptRoot 'StartupPrograms'
 
-# 每打开一个程序后等待几秒再打开下一个
+# プログラムを1つ開いた後、次を開くまで待つ秒数
 $DelayBetweenProgramsSeconds = 3
 
-# 视频目录：目录下的视频会随机排序，循环播放
+# 動画フォルダ：このフォルダ内の動画をランダムな順番でループ再生する
 $VideoFolder = 'C:\Users\shizu\Videos\4K Video Downloader+'
 
-# 算作视频的文件类型
+# 動画とみなすファイルの拡張子
 $VideoExtensions = @('.mp4', '.m4v', '.mkv', '.avi', '.wmv', '.mov')
 
-# 每次启动时生成的播放列表
+# 起動のたびに生成するプレイリスト
 $PlaylistPath = Join-Path $PSScriptRoot 'AutoStart.wpl'
 
-# 程序都打开后等待几秒再启动播放器，避免其他程序的窗口抢走焦点导致全屏失败
+# すべてのプログラムを開いた後、プレーヤーを起動するまで待つ秒数（他のプログラムのウィンドウにフォーカスを奪われて全画面化に失敗するのを防ぐ）
 $WaitBeforeVideoSeconds = 10
 
-# 日志文件（出问题时看这里）
+# ログファイル（問題が起きたときはここを確認）
 $LogFile = Join-Path $PSScriptRoot 'AutoStart.log'
 
 # ----------------------------------------------------------
@@ -65,7 +65,7 @@ public static class Win32
 }
 '@
 
-# 让坐标使用真实像素，避免两块屏幕缩放比例不同时窗口放错位置
+# 座標を実ピクセルで扱う。2つのモニターの拡大率が異なる場合にウィンドウが誤った位置に移動するのを防ぐ
 try {
     if (-not [Win32]::SetProcessDpiAwarenessContext([IntPtr](-4))) { [void][Win32]::SetProcessDPIAware() }
 } catch {
@@ -73,43 +73,43 @@ try {
 }
 Add-Type -AssemblyName System.Windows.Forms
 
-Write-Log '========== 开始 =========='
+Write-Log '========== 開始 =========='
 Start-Sleep -Seconds $StartupDelaySeconds
 
-# ---------- 1. StartupPrograms 文件夹 ----------
-# 快捷方式自带的参数（如 Chrome 后面的网址）和“起始位置”都会生效
+# ---------- 1. StartupPrograms フォルダ ----------
+# ショートカット自体に設定された引数（Chrome の後ろの URL など）と「作業フォルダー」はそのまま有効
 if (Test-Path -LiteralPath $ProgramsFolder) {
     $programs = Get-ChildItem -LiteralPath $ProgramsFolder -File |
                 Where-Object { $_.Name -ne 'desktop.ini' } |
-                Sort-Object @{ Expression = { if ($_.Name -match '^\s*(\d+)') { [int]$Matches[1] } else { [int]::MaxValue } } }, Name   # 按数字排，10. 排在 2. 后面；没编号的放最后
+                Sort-Object @{ Expression = { if ($_.Name -match '^\s*(\d+)') { [int]$Matches[1] } else { [int]::MaxValue } } }, Name   # 数値順にソート。10. は 2. の後ろに来る。番号のないものは最後
     foreach ($item in $programs) {
         try {
             Start-Process -FilePath $item.FullName
-            Write-Log "已打开: $($item.Name)"
+            Write-Log "起動しました: $($item.Name)"
         } catch {
-            Write-Log "打开失败: $($item.Name)  $_"
+            Write-Log "起動失敗: $($item.Name)  $_"
         }
         Start-Sleep -Seconds $DelayBetweenProgramsSeconds
     }
 } else {
-    Write-Log "找不到程序文件夹: $ProgramsFolder"
+    Write-Log "プログラムフォルダが見つかりません: $ProgramsFolder"
 }
 
 Start-Sleep -Seconds $WaitBeforeVideoSeconds
 
-# ---------- 2. Windows Media Player Legacy，第二屏全屏、随机循环 ----------
+# ---------- 2. Windows Media Player Legacy、セカンドモニターで全画面・ランダムループ再生 ----------
 try {
     $wmp = Find-FirstExisting @(
         "$env:ProgramFiles\Windows Media Player\wmplayer.exe",
         "${env:ProgramFiles(x86)}\Windows Media Player\wmplayer.exe"
     )
-    if (-not $wmp)                                  { throw '找不到 wmplayer.exe，请确认已安装 Windows Media Player Legacy' }
-    if (-not (Test-Path -LiteralPath $VideoFolder)) { throw "找不到视频目录: $VideoFolder" }
+    if (-not $wmp)                                  { throw 'wmplayer.exe が見つかりません。Windows Media Player Legacy がインストールされているか確認してください' }
+    if (-not (Test-Path -LiteralPath $VideoFolder)) { throw "動画フォルダが見つかりません: $VideoFolder" }
 
-    # 打乱目录下的视频顺序，写成播放列表（.wpl 是 UTF-8 的 XML，日文文件名不会乱码）
+    # フォルダ内の動画の順番をシャッフルしてプレイリストを作成（.wpl は UTF-8 の XML なので日本語のファイル名も文字化けしない）
     $videos = @(Get-ChildItem -LiteralPath $VideoFolder -File |
                 Where-Object { $VideoExtensions -contains $_.Extension.ToLower() })
-    if ($videos.Count -eq 0) { throw "视频目录里没有视频文件: $VideoFolder" }
+    if ($videos.Count -eq 0) { throw "動画フォルダに動画ファイルがありません: $VideoFolder" }
     $videos = @($videos | Get-Random -Count $videos.Count)
 
     $items = ($videos | ForEach-Object {
@@ -129,62 +129,62 @@ $items
 </smil>
 "@
     [IO.File]::WriteAllText($PlaylistPath, $wpl, (New-Object System.Text.UTF8Encoding $false))
-    Write-Log "播放列表已生成，共 $($videos.Count) 个视频，第一个: $($videos[0].Name)"
+    Write-Log "プレイリストを生成しました。動画数: $($videos.Count)  最初の1本: $($videos[0].Name)"
 
-    # 播放器正在运行的话先关掉，否则下面的设置不生效，播放列表也会被塞进旧窗口
+    # プレーヤーが起動中なら一旦終了する。そうしないと以下の設定が反映されず、プレイリストも既存のウィンドウに読み込まれてしまう
     Get-Process wmplayer -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 1
 
-    # 打开播放器的“重复”和“无序播放”：列表播完后从头再来，每一轮都重新打乱
+    # プレーヤーの「リピート」と「シャッフル」をオンにする：リスト再生後は最初から、毎回シャッフルし直す
     $prefs = 'HKCU:\Software\Microsoft\MediaPlayer\Preferences'
     if (-not (Test-Path $prefs)) { New-Item -Path $prefs | Out-Null }
     Set-ItemProperty -Path $prefs -Name ModeLoop    -Value 1 -Type DWord
     Set-ItemProperty -Path $prefs -Name ModeShuffle -Value 1 -Type DWord
 
     Start-Process -FilePath $wmp -ArgumentList ('"{0}"' -f $PlaylistPath)
-    Write-Log '播放器已启动，等待窗口出现'
+    Write-Log 'プレーヤーを起動しました。ウィンドウの表示を待機中'
 
-    # 等待播放器主窗口出现（窗口类名 WMPlayerApp）
+    # プレーヤーのメインウィンドウが表示されるのを待つ（ウィンドウクラス名 WMPlayerApp）
     $hwnd = [IntPtr]::Zero
     for ($i = 0; $i -lt 60; $i++) {
         $hwnd = [Win32]::FindWindow('WMPlayerApp', $null)
         if ($hwnd -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($hwnd)) { break }
         Start-Sleep -Milliseconds 500
     }
-    if ($hwnd -eq [IntPtr]::Zero) { throw '30 秒内没有等到播放器窗口' }
+    if ($hwnd -eq [IntPtr]::Zero) { throw '30秒待ってもプレーヤーのウィンドウが表示されませんでした' }
 
-    # 播放器启动后会恢复自己上次的窗口位置，稍等一下再移动，免得被它覆盖
+    # プレーヤーは起動後に前回のウィンドウ位置を復元するため、少し待ってから移動する（上書きされないように）
     Start-Sleep -Seconds 2
 
     $screen = [System.Windows.Forms.Screen]::AllScreens | Where-Object { -not $_.Primary } | Select-Object -First 1
     if ($screen) {
         $area = $screen.WorkingArea
-        [void][Win32]::ShowWindow($hwnd, 9)   # SW_RESTORE：先取消最大化，否则移动无效
+        [void][Win32]::ShowWindow($hwnd, 9)   # SW_RESTORE：先に最大化を解除しないと移動できない
         [void][Win32]::SetWindowPos($hwnd, [IntPtr]::Zero, $area.X + 50, $area.Y + 50, 960, 600, 0x0044)  # SWP_NOZORDER | SWP_SHOWWINDOW
-        Write-Log "播放器已移到第二屏: $($screen.DeviceName) $($screen.Bounds)"
+        Write-Log "プレーヤーをセカンドモニターに移動しました: $($screen.DeviceName) $($screen.Bounds)"
         Start-Sleep -Seconds 1
     } else {
-        Write-Log '只检测到一块屏幕，将在主屏全屏播放'
+        Write-Log 'モニターが1台しか検出されませんでした。メインモニターで全画面再生します'
     }
 
-    # 把播放器切到前台后发送 Alt+Enter 进入全屏（全屏会铺满窗口所在的那块屏幕）
+    # プレーヤーを前面に切り替えてから Alt+Enter を送信し全画面化する（全画面はウィンドウがあるモニターいっぱいに表示される）
     $VK_MENU = 0x12; $VK_RETURN = 0x0D; $KEYUP = 0x2
     for ($i = 0; $i -lt 10 -and [Win32]::GetForegroundWindow() -ne $hwnd; $i++) {
-        # 先按一下 Alt，绕过 Windows 对后台进程抢前台的限制
+        # 先に Alt キーを押すことで、バックグラウンドプロセスが前面を奪うことへの Windows の制限を回避する
         [Win32]::keybd_event($VK_MENU, 0, 0, [UIntPtr]::Zero)
         [void][Win32]::SetForegroundWindow($hwnd)
         [Win32]::keybd_event($VK_MENU, 0, $KEYUP, [UIntPtr]::Zero)
         Start-Sleep -Milliseconds 500
     }
-    if ([Win32]::GetForegroundWindow() -ne $hwnd) { throw '无法把播放器切到前台，未能进入全屏' }
+    if ([Win32]::GetForegroundWindow() -ne $hwnd) { throw 'プレーヤーを前面に切り替えられず、全画面化できませんでした' }
 
     [Win32]::keybd_event($VK_MENU,   0, 0,      [UIntPtr]::Zero)
     [Win32]::keybd_event($VK_RETURN, 0, 0,      [UIntPtr]::Zero)
     [Win32]::keybd_event($VK_RETURN, 0, $KEYUP, [UIntPtr]::Zero)
     [Win32]::keybd_event($VK_MENU,   0, $KEYUP, [UIntPtr]::Zero)
-    Write-Log '已发送全屏指令'
+    Write-Log '全画面化コマンドを送信しました'
 } catch {
-    Write-Log "播放器处理失败: $_"
+    Write-Log "プレーヤー処理に失敗しました: $_"
 }
 
-Write-Log '========== 结束 =========='
+Write-Log '========== 終了 =========='
