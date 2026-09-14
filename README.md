@@ -134,3 +134,5 @@ powershell -ExecutionPolicy Bypass -File "Install-AutoStart.ps1" -Uninstall
 
 powershell -NoProfile -Command "Get-ExecutionPolicy -List; $ExecutionContext.SessionState.LanguageMode"
 如果 LanguageMode 显示 FullLanguage，那 .cmd 方案就能用；若是 ConstrainedLanguage 就属于上面说的边界情况。把结果发我，我帮你确认。
+
+$ExecutionContext.SessionState.LanguageMode
