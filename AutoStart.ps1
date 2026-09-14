@@ -89,6 +89,16 @@ function Set-Foreground([IntPtr]$hwnd) {
     return ([Win32]::GetForegroundWindow() -eq $hwnd)
 }
 
+# ウィンドウがそのモニターをほぼ埋めている（＝全画面）かどうかを判定する。
+function Test-Fullscreen([IntPtr]$hwnd) {
+    $r = New-Object 'Win32+RECT'
+    if (-not [Win32]::GetWindowRect($hwnd, [ref]$r)) { return $false }
+    $b = [System.Windows.Forms.Screen]::FromHandle($hwnd).Bounds
+    $w = $r.Right - $r.Left
+    $h = $r.Bottom - $r.Top
+    return ($w -ge ($b.Width - 4) -and $h -ge ($b.Height - 4))
+}
+
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -108,6 +118,10 @@ public static class Win32
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rc);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 }
 '@
 
@@ -259,24 +273,44 @@ $items
         Write-Log 'モニターが1台しか検出されませんでした。メインモニターで全画面再生します'
     }
 
-    # 再生が始まるのを少し待つ（再生中でないと Alt+Enter で全画面にならないことがある）
-    Start-Sleep -Seconds 2
+    # 再生が始まるのを少し待つ（再生中でないと全画面にならないことがある）
+    Start-Sleep -Seconds 3
 
-    # プレーヤーを確実に前面へ。何度か試す。
-    $fgOk = $false
-    for ($i = 0; $i -lt 5 -and -not $fgOk; $i++) {
-        $fgOk = Set-Foreground $hwnd
-        if (-not $fgOk) { Start-Sleep -Milliseconds 500 }
-    }
-    if (-not $fgOk) { Write-Log '警告: プレーヤーを前面にできませんでした。全画面にならない可能性があります' }
-
-    # Alt+Enter を送信して全画面化（全画面はウィンドウがあるモニターいっぱいに表示される）
+    # 全画面化：①前面に出す → ②Alt+Enter → 効かなければ③画面中央をダブルクリック。最大3回、毎回検証。
     $VK_MENU = 0x12; $VK_RETURN = 0x0D; $KEYUP = 0x2
-    [Win32]::keybd_event($VK_MENU,   0, 0,      [UIntPtr]::Zero)
-    [Win32]::keybd_event($VK_RETURN, 0, 0,      [UIntPtr]::Zero)
-    [Win32]::keybd_event($VK_RETURN, 0, $KEYUP, [UIntPtr]::Zero)
-    [Win32]::keybd_event($VK_MENU,   0, $KEYUP, [UIntPtr]::Zero)
-    Write-Log '全画面化コマンド（Alt+Enter）を送信しました'
+    $LEFTDOWN = 0x2; $LEFTUP = 0x4
+    $full = $false
+    for ($try = 1; $try -le 3 -and -not $full; $try++) {
+        $fgOk = Set-Foreground $hwnd
+        Start-Sleep -Milliseconds 500
+
+        # ② Alt+Enter
+        [Win32]::keybd_event($VK_MENU,   0, 0,      [UIntPtr]::Zero)
+        [Win32]::keybd_event($VK_RETURN, 0, 0,      [UIntPtr]::Zero)
+        [Win32]::keybd_event($VK_RETURN, 0, $KEYUP, [UIntPtr]::Zero)
+        [Win32]::keybd_event($VK_MENU,   0, $KEYUP, [UIntPtr]::Zero)
+        Start-Sleep -Seconds 1
+        $full = Test-Fullscreen $hwnd
+
+        # ③ まだ全画面でなければ、ウィンドウ中央をダブルクリック（WMP は映像のダブルクリックで全画面切り替え）
+        if (-not $full) {
+            $r = New-Object 'Win32+RECT'
+            if ([Win32]::GetWindowRect($hwnd, [ref]$r)) {
+                $cx = [int](($r.Left + $r.Right) / 2)
+                $cy = [int](($r.Top + $r.Bottom) / 2)
+                [void][Win32]::SetCursorPos($cx, $cy)
+                Start-Sleep -Milliseconds 100
+                [Win32]::mouse_event($LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero); [Win32]::mouse_event($LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                Start-Sleep -Milliseconds 120
+                [Win32]::mouse_event($LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero); [Win32]::mouse_event($LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                Start-Sleep -Seconds 1
+                $full = Test-Fullscreen $hwnd
+            }
+        }
+        Write-Log ("全画面化 試行{0}: 前面={1}, 全画面={2}" -f $try, $fgOk, $full)
+    }
+    if ($full) { Write-Log '全画面になりました' }
+    else       { Write-Log '警告: 全画面にできませんでした。AutoStart.log の「試行」行を確認してください' }
 } catch {
     Write-Log "プレーヤー処理に失敗しました: $_"
 }
