@@ -25,6 +25,11 @@ $ChromeUrls = @(
     'https://www.youtube.com/watch?v=Efu7J9uQMxY'
 )
 
+# Chrome を開いた後にアクティブにするタブ番号（左から数えた順番、1〜8）。
+# YouTube などはバックグラウンドのタブだと自動再生されないため、そのタブを前面にする。
+# 上のリストで YouTube は2番目なので 2。0 にすると切り替えない。
+$ActivateChromeTab = 2
+
 # 自動起動したいプログラムのショートカットを置くフォルダ
 # ショートカットは名前の先頭の番号順に開く（例："1. SMARTDent"）。
 # Chrome は上の $ChromeUrls で開くため、このフォルダに Chrome のショートカットがあっても
@@ -63,6 +68,27 @@ function Find-FirstExisting([string[]]$Paths) {
     return $null
 }
 
+# ウィンドウを確実に前面に持ってくる。
+# バックグラウンドのプロセスからは SetForegroundWindow が無視されることがあるため、
+# 対象ウィンドウのスレッドと現在のスレッドの入力を一時的に結び付けて（AttachThreadInput）強制する。
+# 成功したら $true。
+function Set-Foreground([IntPtr]$hwnd) {
+    if ($hwnd -eq [IntPtr]::Zero) { return $false }
+    $fg   = [Win32]::GetForegroundWindow()
+    $tCur = [Win32]::GetCurrentThreadId()
+    $tFg  = [Win32]::GetWindowThreadProcessId($fg,   [IntPtr]::Zero)
+    $tTgt = [Win32]::GetWindowThreadProcessId($hwnd, [IntPtr]::Zero)
+    [void][Win32]::AttachThreadInput($tCur, $tFg,  $true)
+    [void][Win32]::AttachThreadInput($tCur, $tTgt, $true)
+    [void][Win32]::ShowWindow($hwnd, 9)          # SW_RESTORE：最小化/最大化を解除
+    [void][Win32]::BringWindowToTop($hwnd)
+    [void][Win32]::SetForegroundWindow($hwnd)
+    [void][Win32]::AttachThreadInput($tCur, $tTgt, $false)
+    [void][Win32]::AttachThreadInput($tCur, $tFg,  $false)
+    for ($i = 0; $i -lt 20 -and [Win32]::GetForegroundWindow() -ne $hwnd; $i++) { Start-Sleep -Milliseconds 100 }
+    return ([Win32]::GetForegroundWindow() -eq $hwnd)
+}
+
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -78,6 +104,10 @@ public static class Win32
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 }
 '@
 
@@ -103,6 +133,34 @@ if ($ChromeUrls.Count -gt 0) {
         if (-not $chrome) { $chrome = 'chrome.exe' }   # 見つからなければ App Paths に任せる
         Start-Process -FilePath $chrome -ArgumentList $ChromeUrls
         Write-Log "Chrome を起動しました: $($ChromeUrls -join ' ')"
+
+        # 指定したタブ（YouTube など）をアクティブにする。
+        # バックグラウンドのタブは自動再生されないため、Chrome を前面にして Ctrl+数字 でそのタブに切り替える。
+        if ($ActivateChromeTab -ge 1 -and $ActivateChromeTab -le 8 -and $ChromeUrls.Count -ge $ActivateChromeTab) {
+            # Chrome のメインウィンドウ（ハンドルを持つプロセス）が現れるのを待つ
+            $chwnd = [IntPtr]::Zero
+            for ($i = 0; $i -lt 30; $i++) {
+                Start-Sleep -Milliseconds 500
+                $cp = Get-Process chrome -ErrorAction SilentlyContinue |
+                      Where-Object { $_.MainWindowHandle -ne 0 } |
+                      Sort-Object StartTime -Descending | Select-Object -First 1
+                if ($cp) { $chwnd = $cp.MainWindowHandle; break }
+            }
+            if ($chwnd -ne [IntPtr]::Zero) {
+                Start-Sleep -Seconds 3            # ページ（YouTube）の読み込みを待つ
+                [void](Set-Foreground $chwnd)
+                Start-Sleep -Milliseconds 300
+                # Ctrl + 数字 で N 番目のタブへ（Ctrl+2 = 2番目）
+                $VK_CONTROL = 0x11; $KEYUP = 0x2; $vkDigit = [byte](0x30 + $ActivateChromeTab)
+                [Win32]::keybd_event($VK_CONTROL, 0, 0,      [UIntPtr]::Zero)
+                [Win32]::keybd_event($vkDigit,    0, 0,      [UIntPtr]::Zero)
+                [Win32]::keybd_event($vkDigit,    0, $KEYUP, [UIntPtr]::Zero)
+                [Win32]::keybd_event($VK_CONTROL, 0, $KEYUP, [UIntPtr]::Zero)
+                Write-Log "Chrome の $ActivateChromeTab 番目のタブをアクティブにしました"
+            } else {
+                Write-Log 'Chrome のウィンドウが見つからず、タブ切り替えをスキップしました'
+            }
+        }
     } catch {
         Write-Log "Chrome の起動に失敗しました: $_"
     }
@@ -201,22 +259,24 @@ $items
         Write-Log 'モニターが1台しか検出されませんでした。メインモニターで全画面再生します'
     }
 
-    # プレーヤーを前面に切り替えてから Alt+Enter を送信し全画面化する（全画面はウィンドウがあるモニターいっぱいに表示される）
-    $VK_MENU = 0x12; $VK_RETURN = 0x0D; $KEYUP = 0x2
-    for ($i = 0; $i -lt 10 -and [Win32]::GetForegroundWindow() -ne $hwnd; $i++) {
-        # 先に Alt キーを押すことで、バックグラウンドプロセスが前面を奪うことへの Windows の制限を回避する
-        [Win32]::keybd_event($VK_MENU, 0, 0, [UIntPtr]::Zero)
-        [void][Win32]::SetForegroundWindow($hwnd)
-        [Win32]::keybd_event($VK_MENU, 0, $KEYUP, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 500
-    }
-    if ([Win32]::GetForegroundWindow() -ne $hwnd) { throw 'プレーヤーを前面に切り替えられず、全画面化できませんでした' }
+    # 再生が始まるのを少し待つ（再生中でないと Alt+Enter で全画面にならないことがある）
+    Start-Sleep -Seconds 2
 
+    # プレーヤーを確実に前面へ。何度か試す。
+    $fgOk = $false
+    for ($i = 0; $i -lt 5 -and -not $fgOk; $i++) {
+        $fgOk = Set-Foreground $hwnd
+        if (-not $fgOk) { Start-Sleep -Milliseconds 500 }
+    }
+    if (-not $fgOk) { Write-Log '警告: プレーヤーを前面にできませんでした。全画面にならない可能性があります' }
+
+    # Alt+Enter を送信して全画面化（全画面はウィンドウがあるモニターいっぱいに表示される）
+    $VK_MENU = 0x12; $VK_RETURN = 0x0D; $KEYUP = 0x2
     [Win32]::keybd_event($VK_MENU,   0, 0,      [UIntPtr]::Zero)
     [Win32]::keybd_event($VK_RETURN, 0, 0,      [UIntPtr]::Zero)
     [Win32]::keybd_event($VK_RETURN, 0, $KEYUP, [UIntPtr]::Zero)
     [Win32]::keybd_event($VK_MENU,   0, $KEYUP, [UIntPtr]::Zero)
-    Write-Log '全画面化コマンドを送信しました'
+    Write-Log '全画面化コマンド（Alt+Enter）を送信しました'
 } catch {
     Write-Log "プレーヤー処理に失敗しました: $_"
 }
