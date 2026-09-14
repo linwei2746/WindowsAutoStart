@@ -1,7 +1,8 @@
 ﻿# ============================================================
 #  起動時自動実行スクリプト
-#  1. StartupPrograms フォルダ内のショートカットを番号順にすべて開く
-#  2. Windows Media Player Legacy で動画フォルダをランダム・ループでセカンドモニターに全画面表示
+#  1. Chrome で指定したリンクを開く
+#  2. StartupPrograms フォルダ内のショートカットを番号順に開く
+#  3. Windows Media Player Legacy で動画フォルダをランダム・ループでセカンドモニターに全画面表示
 #
 #  注意：このファイルは必ず "UTF-8 with BOM" で保存すること。そうしないとパス内の日本語が文字化けする。
 # ============================================================
@@ -17,15 +18,24 @@ $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 # 起動後、デスクトップ・ネットワーク・モニターが準備できるまで数秒待つ
 $StartupDelaySeconds = 15
 
+# Chrome で自動的に開くリンク（1行に1つ。複数指定するとそれぞれ別タブで開く）
+# 空の @() にすると Chrome は開かない。
+$ChromeUrls = @(
+    'https://apo-toolboxes.stransa.co.jp/calendar/',
+    'https://www.youtube.com/watch?v=Efu7J9uQMxY'
+)
+
 # 自動起動したいプログラムのショートカットを置くフォルダ
-# ショートカットは名前の先頭の番号順に開く（例："1. Chrome"、"2. SMARTDent"）
+# ショートカットは名前の先頭の番号順に開く（例："1. SMARTDent"）。
+# Chrome は上の $ChromeUrls で開くため、このフォルダに Chrome のショートカットがあっても
+# 二重に開かないよう自動でスキップする。
 $ProgramsFolder = Join-Path $ScriptDir 'StartupPrograms'
 
 # プログラムを1つ開いた後、次を開くまで待つ秒数
 $DelayBetweenProgramsSeconds = 3
 
 # 動画フォルダ：このフォルダ内の動画をランダムな順番でループ再生する
-$VideoFolder = 'C:\Users\shizu\Videos\4K Video Downloader+'
+$VideoFolder = 'C:\Users\ONEUSER\Videos\ExhibitionVideo'
 
 # 動画とみなすファイルの拡張子
 $VideoExtensions = @('.mp4', '.m4v', '.mkv', '.avi', '.wmv', '.mov')
@@ -82,11 +92,29 @@ Add-Type -AssemblyName System.Windows.Forms
 Write-Log '========== 開始 =========='
 Start-Sleep -Seconds $StartupDelaySeconds
 
-# ---------- 1. StartupPrograms フォルダ ----------
-# ショートカット自体に設定された引数（Chrome の後ろの URL など）と「作業フォルダー」はそのまま有効
+# ---------- 1. Chrome で指定したリンクを開く ----------
+if ($ChromeUrls.Count -gt 0) {
+    try {
+        $chrome = Find-FirstExisting @(
+            "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+            "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+            "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+        )
+        if (-not $chrome) { $chrome = 'chrome.exe' }   # 見つからなければ App Paths に任せる
+        Start-Process -FilePath $chrome -ArgumentList $ChromeUrls
+        Write-Log "Chrome を起動しました: $($ChromeUrls -join ' ')"
+    } catch {
+        Write-Log "Chrome の起動に失敗しました: $_"
+    }
+    Start-Sleep -Seconds $DelayBetweenProgramsSeconds
+}
+
+# ---------- 2. StartupPrograms フォルダ（Chrome 以外のプログラム）----------
+# ショートカット自体に設定された引数と「作業フォルダー」はそのまま有効
 if (Test-Path -LiteralPath $ProgramsFolder) {
     $programs = Get-ChildItem -LiteralPath $ProgramsFolder -File |
                 Where-Object { $_.Name -ne 'desktop.ini' } |
+                Where-Object { $_.Name -notmatch 'chrome' } |   # Chrome は上のステップで開くのでスキップ（二重起動防止）
                 Sort-Object @{ Expression = { if ($_.Name -match '^\s*(\d+)') { [int]$Matches[1] } else { [int]::MaxValue } } }, Name   # 数値順にソート。10. は 2. の後ろに来る。番号のないものは最後
     foreach ($item in $programs) {
         try {
@@ -103,7 +131,7 @@ if (Test-Path -LiteralPath $ProgramsFolder) {
 
 Start-Sleep -Seconds $WaitBeforeVideoSeconds
 
-# ---------- 2. Windows Media Player Legacy、セカンドモニターで全画面・ランダムループ再生 ----------
+# ---------- 3. Windows Media Player Legacy、セカンドモニターで全画面・ランダムループ再生 ----------
 try {
     $wmp = Find-FirstExisting @(
         "$env:ProgramFiles\Windows Media Player\wmplayer.exe",
